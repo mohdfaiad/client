@@ -633,6 +633,10 @@
         {
           "type": "int64",
           "name": "localDiskBytesTotal"
+        },
+        {
+          "type": "PrefetchStatus",
+          "name": "prefetchStatus"
         }
       ]
     },
