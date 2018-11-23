@@ -201,3 +201,25 @@ func (o *outputter) outputStringOrUint(i interface{}) error {
 		return errors.New("Unhandled map key interface type in output path")
 	}
 }
+
+// we we substitue in a binary or string for something in our dictionary,
+// we output it as a bigendian integer, prefixed by the "external" byte.
+func (o *outputter) outputExtUint(u uint) error {
+	var i interface{}
+	var b byte
+	switch {
+	case u <= 0xff:
+		b = 0xd4
+		i = uint8(u)
+	case u <= 0xffff:
+		b = 0xd5
+		i = uint16(u)
+	case u <= 0xffffffff:
+		b = 0xd6
+		i = uint32(u)
+	default:
+		b = 0xd7
+		i = uint64(u)
+	}
+	return o.outputPrefixAndBinaryInt(b, i)
+}

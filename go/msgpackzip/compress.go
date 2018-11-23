@@ -65,6 +65,8 @@ func (c *compressor) run() (output []byte, err error) {
 	return output, err
 }
 
+type binaryMapKey string
+
 func (c *compressor) collectFrequencies() (ret map[interface{}]int, err error) {
 
 	ret = make(map[interface{}]int)
@@ -88,6 +90,19 @@ func (c *compressor) collectFrequencies() (ret map[interface{}]int, err error) {
 				},
 			}
 			return d, nil
+		},
+		stringHook: func(l msgpackInt, s string) error {
+			if c.valueWhiteList.strings[s] {
+				ret[s]++
+			}
+			return nil
+		},
+		binaryHook: func(l msgpackInt, b []byte) error {
+			s := string(b)
+			if c.valueWhiteList.binaries[s] {
+				ret[binaryMapKey(s)]++
+			}
+			return nil
 		},
 	}
 	err = newMsgpackDecoder(bytes.NewReader(c.input)).run(hooks)
@@ -161,6 +176,20 @@ func (c *compressor) outputData(keys map[interface{}]uint) (output []byte, err e
 			},
 		}
 		return d, nil
+	}
+	hooks.stringHook = func(l msgpackInt, s string) error {
+		val, ok := keys[s]
+		if ok {
+			return data.outputExtUint(val)
+		}
+		return data.outputString(l, s)
+	}
+	hooks.binaryHook = func(l msgpackInt, b []byte) error {
+		val, ok := keys[binaryMapKey(string(b))]
+		if ok {
+			return data.outputExtUint(val)
+		}
+		return data.outputBinary(l, b)
 	}
 
 	err = newMsgpackDecoder(bytes.NewReader(c.input)).run(hooks)
