@@ -7,15 +7,48 @@ import (
 )
 
 type compressor struct {
-	input []byte
+	input          []byte
+	valueWhiteList valueWhiteList
 }
 
-func newCompressor(b []byte) *compressor {
-	return &compressor{input: b}
+func newCompressor(b []byte, wl valueWhiteList) *compressor {
+	return &compressor{input: b, valueWhiteList: wl}
+}
+
+type ValueWhitelist struct {
+	Strings  []string
+	Binaries [][]byte
+}
+
+type valueWhiteList struct {
+	strings  map[string]bool
+	binaries map[string]bool
+}
+
+func (v ValueWhitelist) mapify() valueWhiteList {
+	ret := emptyWhiteList()
+	for _, s := range v.Strings {
+		ret.strings[s] = true
+	}
+	for _, b := range v.Binaries {
+		ret.strings[string(b)] = true
+	}
+	return ret
+}
+
+func emptyWhiteList() valueWhiteList {
+	return valueWhiteList{
+		strings:  make(map[string]bool),
+		binaries: make(map[string]bool),
+	}
+}
+
+func CompressWithWhiteList(input []byte, wl ValueWhitelist) (output []byte, err error) {
+	return newCompressor(input, wl.mapify()).run()
 }
 
 func Compress(input []byte) (output []byte, err error) {
-	return newCompressor(input).run()
+	return newCompressor(input, emptyWhiteList()).run()
 }
 
 func (c *compressor) run() (output []byte, err error) {
