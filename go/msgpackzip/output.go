@@ -191,7 +191,7 @@ func (o *outputter) decoderHooks() msgpackDecoderHooks {
 	}
 }
 
-func (o *outputter) outputStringOrUint(i interface{}) error {
+func (o *outputter) outputStringOrUintOrBinary(i interface{}) error {
 	switch t := i.(type) {
 	case binaryMapKey:
 		return o.outputBinary(msgpackIntFromUint(uint(len(t))), []byte(t))

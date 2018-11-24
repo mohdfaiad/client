@@ -2,8 +2,10 @@ package msgpackzip
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 )
 
 type inflator struct {
@@ -168,6 +170,9 @@ func (c *inflator) inflateKeymap(compressedKeymap []byte) (keymap map[uint]inter
 				stringHook: func(mpi msgpackInt, s string) error {
 					return putValue(s)
 				},
+				binaryHook: func(mpi msgpackInt, b []byte) error {
+					return putValue(binaryMapKey(string(b)))
+				},
 				fallthroughHook: fallthroughHook,
 			}
 			return d, nil
@@ -180,6 +185,39 @@ func (c *inflator) inflateKeymap(compressedKeymap []byte) (keymap map[uint]inter
 		return nil, err
 	}
 	return keymap, nil
+}
+
+func decodeBufToUint32(b []byte) (uint32, error) {
+	switch len(b) {
+	case 1:
+		return uint32(b[0]), nil
+	case 2:
+		var u uint16
+		err := binary.Read(bytes.NewBuffer(b), binary.BigEndian, &u)
+		if err != nil {
+			return 0, err
+		}
+		return uint32(u), nil
+	case 4:
+		var u uint32
+		err := binary.Read(bytes.NewBuffer(b), binary.BigEndian, &u)
+		if err != nil {
+			return 0, err
+		}
+		return u, nil
+	case 8:
+		var u uint64
+		err := binary.Read(bytes.NewBuffer(b), binary.BigEndian, &u)
+		if err != nil {
+			return 0, err
+		}
+		if u >= math.MaxUint32 {
+			return 0, ErrIntTooBig
+		}
+		return uint32(u), nil
+	default:
+		return 0, fmt.Errorf("bad external element; len=%d", len(b))
+	}
 }
 
 func (c *inflator) inflateData(keymap map[uint]interface{}, compressedData []byte) (ret []byte, err error) {
@@ -196,13 +234,24 @@ func (c *inflator) inflateData(keymap map[uint]interface{}, compressedData []byt
 				if !ok {
 					return fmt.Errorf("Unknown map key: %d", i)
 				}
-				return data.outputStringOrUint(key)
+				return data.outputStringOrUintOrBinary(key)
 			},
 			fallthroughHook: func(i interface{}, typ string) error {
 				return fmt.Errorf("Expected only int map keys; got a %q", typ)
 			},
 		}
 		return d, nil
+	}
+	hooks.extHook = func(b []byte) error {
+		u, err := decodeBufToUint32(b)
+		if err != nil {
+			return err
+		}
+		key, ok := keymap[uint(u)]
+		if !ok {
+			return fmt.Errorf("Unknown map key: %d", u)
+		}
+		return data.outputStringOrUintOrBinary(key)
 	}
 	buf := bytes.NewBuffer(compressedData)
 	err = newMsgpackDecoder(buf).run(hooks)

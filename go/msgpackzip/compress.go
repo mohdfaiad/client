@@ -191,6 +191,9 @@ func (c *compressor) outputData(keys map[interface{}]uint) (output []byte, err e
 		}
 		return data.outputBinary(l, b)
 	}
+	hooks.extHook = func(b []byte) error {
+		return fmt.Errorf("cannot handle external data types")
+	}
 
 	err = newMsgpackDecoder(bytes.NewReader(c.input)).run(hooks)
 	if err != nil {
@@ -217,7 +220,7 @@ func (c *compressor) outputCompressedKeymap(keys map[interface{}]uint) (output [
 		if err != nil {
 			return nil, err
 		}
-		err = keymap.outputStringOrUint(k)
+		err = keymap.outputStringOrUintOrBinary(k)
 		if err != nil {
 			return nil, err
 		}
