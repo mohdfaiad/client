@@ -16,7 +16,7 @@ func newCompressor(b []byte, wl valueWhiteList, c bool) *compressor {
 	return &compressor{input: b, valueWhiteList: wl, collectMapKeys: c}
 }
 
-type ValueWhitelist struct {
+type ValueWhiteList struct {
 	Strings  []string
 	Binaries [][]byte
 }
@@ -27,13 +27,13 @@ type valueWhiteList struct {
 	allValuesOk bool
 }
 
-func (v ValueWhitelist) mapify() valueWhiteList {
+func (v ValueWhiteList) mapify() valueWhiteList {
 	ret := emptyWhiteList()
 	for _, s := range v.Strings {
 		ret.strings[s] = true
 	}
 	for _, b := range v.Binaries {
-		ret.strings[string(b)] = true
+		ret.binaries[string(b)] = true
 	}
 	return ret
 }
@@ -64,7 +64,7 @@ func (v valueWhiteList) withAllValuesOk() valueWhiteList {
 	return v
 }
 
-func CompressWithWhiteList(input []byte, wl ValueWhitelist) (output []byte, err error) {
+func CompressWithWhiteList(input []byte, wl ValueWhiteList) (output []byte, err error) {
 	return newCompressor(input, wl.mapify(), true).run()
 }
 
@@ -108,27 +108,31 @@ type binaryMapKey string
 func (c *compressor) collectFrequencies() (ret map[interface{}]int, err error) {
 
 	ret = make(map[interface{}]int)
-	mapKeyHook := func(d decodeStack) (decodeStack, error) {
-		d.hooks = msgpackDecoderHooks{
-			stringHook: func(l msgpackInt, s string) error {
-				ret[s]++
-				return nil
-			},
-			intHook: func(l msgpackInt) error {
-				i, err := l.toInt64()
-				if err != nil {
-					return err
-				}
-				ret[i]++
-				return nil
-			},
-			fallthroughHook: func(i interface{}, s string) error {
-				return fmt.Errorf("bad map key (type %T)", i)
-			},
-		}
-		return d, nil
-	}
 	hooks := msgpackDecoderHooks{
+		mapKeyHook: func(d decodeStack) (decodeStack, error) {
+			d.hooks = msgpackDecoderHooks{
+				stringHook: func(l msgpackInt, s string) error {
+					if c.collectMapKeys {
+						ret[s]++
+					}
+					return nil
+				},
+				intHook: func(l msgpackInt) error {
+					i, err := l.toInt64()
+					if err != nil {
+						return err
+					}
+					if c.collectMapKeys {
+						ret[i]++
+					}
+					return nil
+				},
+				fallthroughHook: func(i interface{}, s string) error {
+					return fmt.Errorf("bad map key (type %T)", i)
+				},
+			}
+			return d, nil
+		},
 		stringHook: func(l msgpackInt, s string) error {
 			if c.valueWhiteList.hasString(s) {
 				ret[s]++
@@ -142,9 +146,6 @@ func (c *compressor) collectFrequencies() (ret map[interface{}]int, err error) {
 			}
 			return nil
 		},
-	}
-	if c.collectMapKeys {
-		hooks.mapKeyHook = mapKeyHook
 	}
 	err = newMsgpackDecoder(bytes.NewReader(c.input)).run(hooks)
 	if err != nil {
