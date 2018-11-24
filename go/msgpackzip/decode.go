@@ -13,6 +13,7 @@ var ErrStringTooBig = errors.New("string allocation is too big")
 var ErrBinaryTooBig = errors.New("binary allocation is too big")
 var ErrLenTooBig = errors.New("Lenghts bigger than 0x8000000 are too big")
 var ErrIntTooBig = errors.New("Cannot handle ints largers than int64 max")
+var ErrExtTooBig = errors.New("extenal data type too big")
 
 type count uint64
 
@@ -42,6 +43,7 @@ const bigString = bigLen
 const bigBinary = bigLen
 const bigArray = 0x100000
 const bigStackDepth = 0x100
+const bigExt = bigLen
 
 func (i msgpackInt) toLen() (int, error) {
 	if i.typ == intTypeUint64 {
@@ -109,6 +111,7 @@ type msgpackDecoderHooks struct {
 	float32Hook     func(b []byte) error
 	float64Hook     func(b []byte) error
 	boolHook        func(b bool) error
+	extHook         func(b []byte) error
 	fallthroughHook func(i interface{}, s string) error
 }
 
@@ -420,8 +423,26 @@ func (m *msgpackDecoder) decodeMap(s decodeStack, n msgpackInt) (err error) {
 	return nil
 }
 
-func (m *msgpackDecoder) decodeExt(s decodeStack, n uint32) (err error) {
+func (m *msgpackDecoder) produceExt(s decodeStack, b []byte) (err error) {
+	if s.hooks.extHook != nil {
+		return s.hooks.extHook(b)
+	}
+	if s.hooks.fallthroughHook != nil {
+		return s.hooks.fallthroughHook([]byte{}, "ext")
+	}
 	return nil
+}
+
+func (m *msgpackDecoder) decodeExt(s decodeStack, n uint32) (err error) {
+	if n > bigBinary {
+		return ErrExtTooBig
+	}
+	buf := make([]byte, n)
+	_, err = io.ReadFull(m.r, buf[:])
+	if err != nil {
+		return err
+	}
+	return m.produceExt(s, buf)
 }
 
 func (m *msgpackDecoder) readByte() (byte, error)         { return readByte(m.r) }
