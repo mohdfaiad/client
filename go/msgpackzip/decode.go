@@ -7,7 +7,6 @@ import (
 	"math"
 )
 
-var ErrExtUnsupported = errors.New("ext types not supported")
 var ErrMaxDepth = errors.New("input exceeded maximum allowed depth")
 var ErrContainerTooBig = errors.New("container allocation is too big")
 var ErrStringTooBig = errors.New("string allocation is too big")
@@ -65,6 +64,19 @@ func (i msgpackInt) toInt64() (int64, error) {
 		return int64(i.uval), nil
 	}
 	return i.val, nil
+}
+
+func (i msgpackInt) toUint32() (uint32, error) {
+	if i.typ == intTypeUint64 {
+		if i.uval >= uint64(math.MaxUint32) {
+			return 0, ErrIntTooBig
+		}
+		return uint32(i.uval), nil
+	}
+	if i.val >= int64(math.MaxUint32) {
+		return 0, ErrIntTooBig
+	}
+	return uint32(i.val), nil
 }
 
 func msgpackIntFromUint(u uint) msgpackInt {
@@ -408,6 +420,10 @@ func (m *msgpackDecoder) decodeMap(s decodeStack, n msgpackInt) (err error) {
 	return nil
 }
 
+func (m *msgpackDecoder) decodeExt(s decodeStack, n uint32) (err error) {
+	return nil
+}
+
 func (m *msgpackDecoder) readByte() (byte, error)         { return readByte(m.r) }
 func (m *msgpackDecoder) readUint16() (msgpackInt, error) { return readUint16(m.r) }
 func (m *msgpackDecoder) readUint32() (msgpackInt, error) { return readUint32(m.r) }
@@ -515,9 +531,43 @@ func (m *msgpackDecoder) decode(s decodeStack) (err error) {
 		}
 		return m.decodeBinary(s, n)
 
-	// Extensible type system not supported
-	case (b >= 0xc7 && b <= 0xc9) || (b >= 0xd4 && b <= 0xd8):
-		return ErrExtUnsupported
+	case b == 0xd4:
+		return m.decodeExt(s, 1)
+	case b == 0xd5:
+		return m.decodeExt(s, 2)
+	case b == 0xd6:
+		return m.decodeExt(s, 4)
+	case b == 0xd7:
+		return m.decodeExt(s, 8)
+	case b == 0xd8:
+		return m.decodeExt(s, 16)
+
+	case b == 0xc7:
+		n, err := m.readByte()
+		if err != nil {
+			return err
+		}
+		return m.decodeExt(s, uint32(n))
+	case b == 0xc8:
+		n, err := m.readUint16()
+		if err != nil {
+			return err
+		}
+		i, err := n.toUint32()
+		if err != nil {
+			return err
+		}
+		return m.decodeExt(s, i)
+	case b == 0xc9:
+		n, err := m.readUint32()
+		if err != nil {
+			return err
+		}
+		i, err := n.toUint32()
+		if err != nil {
+			return err
+		}
+		return m.decodeExt(s, i)
 
 	// uint8
 	case b == 0xcc:
