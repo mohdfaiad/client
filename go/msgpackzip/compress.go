@@ -9,10 +9,11 @@ import (
 type compressor struct {
 	input          []byte
 	valueWhiteList valueWhiteList
+	collectMapKeys bool
 }
 
-func newCompressor(b []byte, wl valueWhiteList) *compressor {
-	return &compressor{input: b, valueWhiteList: wl}
+func newCompressor(b []byte, wl valueWhiteList, c bool) *compressor {
+	return &compressor{input: b, valueWhiteList: wl, collectMapKeys: c}
 }
 
 type ValueWhitelist struct {
@@ -21,8 +22,9 @@ type ValueWhitelist struct {
 }
 
 type valueWhiteList struct {
-	strings  map[string]bool
-	binaries map[string]bool
+	strings     map[string]bool
+	binaries    map[string]bool
+	allValuesOk bool
 }
 
 func (v ValueWhitelist) mapify() valueWhiteList {
@@ -36,6 +38,20 @@ func (v ValueWhitelist) mapify() valueWhiteList {
 	return ret
 }
 
+func (v *valueWhiteList) hasString(s string) bool {
+	if v.allValuesOk {
+		return true
+	}
+	return v.strings[s]
+}
+
+func (v *valueWhiteList) hasBinary(b []byte) bool {
+	if v.allValuesOk {
+		return true
+	}
+	return v.binaries[string(b)]
+}
+
 func emptyWhiteList() valueWhiteList {
 	return valueWhiteList{
 		strings:  make(map[string]bool),
@@ -43,21 +59,43 @@ func emptyWhiteList() valueWhiteList {
 	}
 }
 
+func (v valueWhiteList) withAllValuesOk() valueWhiteList {
+	v.allValuesOk = true
+	return v
+}
+
 func CompressWithWhiteList(input []byte, wl ValueWhitelist) (output []byte, err error) {
-	return newCompressor(input, wl.mapify()).run()
+	return newCompressor(input, wl.mapify(), true).run()
 }
 
 func Compress(input []byte) (output []byte, err error) {
-	return newCompressor(input, emptyWhiteList()).run()
+	return newCompressor(input, emptyWhiteList(), true).run()
 }
 
-func (c *compressor) run() (output []byte, err error) {
+func ReportValuesFrequencies(input []byte) (ret []Frequency, err error) {
+	return newCompressor(input, emptyWhiteList().withAllValuesOk(), false).collectAndSortFrequencies()
+}
+
+func (c *compressor) collectAndSortFrequencies() (ret []Frequency, err error) {
 
 	freqs, err := c.collectFrequencies()
 	if err != nil {
 		return nil, err
 	}
-	keys, err := c.sortIntoKeys(freqs)
+	freqsSorted, err := c.sortFrequencies(freqs)
+	if err != nil {
+		return nil, err
+	}
+	return freqsSorted, nil
+}
+
+func (c *compressor) run() (output []byte, err error) {
+
+	freqsSorted, err := c.collectAndSortFrequencies()
+	if err != nil {
+		return nil, err
+	}
+	keys, err := c.frequenciesToMap(freqsSorted)
 	if err != nil {
 		return nil, err
 	}
@@ -70,40 +108,43 @@ type binaryMapKey string
 func (c *compressor) collectFrequencies() (ret map[interface{}]int, err error) {
 
 	ret = make(map[interface{}]int)
+	mapKeyHook := func(d decodeStack) (decodeStack, error) {
+		d.hooks = msgpackDecoderHooks{
+			stringHook: func(l msgpackInt, s string) error {
+				ret[s]++
+				return nil
+			},
+			intHook: func(l msgpackInt) error {
+				i, err := l.toInt64()
+				if err != nil {
+					return err
+				}
+				ret[i]++
+				return nil
+			},
+			fallthroughHook: func(i interface{}, s string) error {
+				return fmt.Errorf("bad map key (type %T)", i)
+			},
+		}
+		return d, nil
+	}
 	hooks := msgpackDecoderHooks{
-		mapKeyHook: func(d decodeStack) (decodeStack, error) {
-			d.hooks = msgpackDecoderHooks{
-				stringHook: func(l msgpackInt, s string) error {
-					ret[s]++
-					return nil
-				},
-				intHook: func(l msgpackInt) error {
-					i, err := l.toInt64()
-					if err != nil {
-						return err
-					}
-					ret[i]++
-					return nil
-				},
-				fallthroughHook: func(i interface{}, s string) error {
-					return fmt.Errorf("bad map key (type %T)", i)
-				},
-			}
-			return d, nil
-		},
 		stringHook: func(l msgpackInt, s string) error {
-			if c.valueWhiteList.strings[s] {
+			if c.valueWhiteList.hasString(s) {
 				ret[s]++
 			}
 			return nil
 		},
 		binaryHook: func(l msgpackInt, b []byte) error {
 			s := string(b)
-			if c.valueWhiteList.binaries[s] {
+			if c.valueWhiteList.hasBinary(b) {
 				ret[binaryMapKey(s)]++
 			}
 			return nil
 		},
+	}
+	if c.collectMapKeys {
+		hooks.mapKeyHook = mapKeyHook
 	}
 	err = newMsgpackDecoder(bytes.NewReader(c.input)).run(hooks)
 	if err != nil {
@@ -112,21 +153,26 @@ func (c *compressor) collectFrequencies() (ret map[interface{}]int, err error) {
 	return ret, nil
 }
 
-func (c *compressor) sortIntoKeys(freqs map[interface{}]int) (keys map[interface{}]uint, err error) {
-	type tuple struct {
-		key  interface{}
-		freq int
-	}
-	tuples := make([]tuple, len(freqs))
+type Frequency struct {
+	Key  interface{}
+	Freq int
+}
+
+func (c *compressor) sortFrequencies(freqs map[interface{}]int) (ret []Frequency, err error) {
+
+	ret = make([]Frequency, len(freqs))
 	var i int
 	for k, v := range freqs {
-		tuples[i] = tuple{k, v}
+		ret[i] = Frequency{k, v}
 		i++
 	}
-	sort.SliceStable(tuples, func(i, j int) bool { return tuples[i].freq > tuples[j].freq })
+	sort.SliceStable(ret, func(i, j int) bool { return ret[i].freq > ret[j].freq })
+	return ret, nil
+}
 
+func (c *compressor) frequenciesToMap(freqs []Frequency) (keys map[interface{}]uint, err error) {
 	ret := make(map[interface{}]uint, len(freqs))
-	for i, tup := range tuples {
+	for i, tup := range freqs {
 		ret[tup.key] = uint(i)
 	}
 	return ret, nil
