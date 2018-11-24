@@ -166,14 +166,14 @@ func (c *compressor) sortFrequencies(freqs map[interface{}]int) (ret []Frequency
 		ret[i] = Frequency{k, v}
 		i++
 	}
-	sort.SliceStable(ret, func(i, j int) bool { return ret[i].freq > ret[j].freq })
+	sort.SliceStable(ret, func(i, j int) bool { return ret[i].Freq > ret[j].Freq })
 	return ret, nil
 }
 
 func (c *compressor) frequenciesToMap(freqs []Frequency) (keys map[interface{}]uint, err error) {
 	ret := make(map[interface{}]uint, len(freqs))
-	for i, tup := range freqs {
-		ret[tup.key] = uint(i)
+	for i, freq := range freqs {
+		ret[freq.Key] = uint(i)
 	}
 	return ret, nil
 }
