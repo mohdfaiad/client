@@ -8,72 +8,61 @@ import (
 
 type compressor struct {
 	input          []byte
-	valueWhiteList valueWhiteList
+	valueWhitelist ValueWhitelist
 	collectMapKeys bool
 }
 
-func newCompressor(b []byte, wl valueWhiteList, c bool) *compressor {
-	return &compressor{input: b, valueWhiteList: wl, collectMapKeys: c}
+func newCompressor(b []byte, wl ValueWhitelist, c bool) *compressor {
+	return &compressor{input: b, valueWhitelist: wl, collectMapKeys: c}
 }
 
-type ValueWhiteList struct {
-	Strings  []string
-	Binaries [][]byte
-}
-
-type valueWhiteList struct {
+type ValueWhitelist struct {
 	strings     map[string]bool
 	binaries    map[string]bool
 	allValuesOk bool
 }
 
-func (v ValueWhiteList) mapify() valueWhiteList {
-	ret := emptyWhiteList()
-	for _, s := range v.Strings {
-		ret.strings[s] = true
+func NewValueWhitelist() *ValueWhitelist {
+	return &ValueWhitelist{
+		strings:  make(map[string]bool),
+		binaries: make(map[string]bool),
 	}
-	for _, b := range v.Binaries {
-		ret.binaries[string(b)] = true
-	}
-	return ret
 }
 
-func (v *valueWhiteList) hasString(s string) bool {
+func (v *ValueWhitelist) AddString(s string) {
+	v.strings[s] = true
+}
+
+func (v *ValueWhitelist) AddBinary(b []byte) {
+	v.binaries[string(b)] = true
+}
+
+func (v *ValueWhitelist) hasString(s string) bool {
 	if v.allValuesOk {
 		return true
 	}
 	return v.strings[s]
 }
 
-func (v *valueWhiteList) hasBinary(b []byte) bool {
+func (v *ValueWhitelist) hasBinary(b []byte) bool {
 	if v.allValuesOk {
 		return true
 	}
 	return v.binaries[string(b)]
 }
 
-func emptyWhiteList() valueWhiteList {
-	return valueWhiteList{
-		strings:  make(map[string]bool),
-		binaries: make(map[string]bool),
-	}
-}
-
-func (v valueWhiteList) withAllValuesOk() valueWhiteList {
-	v.allValuesOk = true
-	return v
-}
-
-func CompressWithWhiteList(input []byte, wl ValueWhiteList) (output []byte, err error) {
-	return newCompressor(input, wl.mapify(), true).run()
+func CompressWithWhiteList(input []byte, wl ValueWhitelist) (output []byte, err error) {
+	return newCompressor(input, wl, true).run()
 }
 
 func Compress(input []byte) (output []byte, err error) {
-	return newCompressor(input, emptyWhiteList(), true).run()
+	return newCompressor(input, *NewValueWhitelist(), true).run()
 }
 
 func ReportValuesFrequencies(input []byte) (ret []Frequency, err error) {
-	return newCompressor(input, emptyWhiteList().withAllValuesOk(), false).collectAndSortFrequencies()
+	wl := NewValueWhitelist()
+	wl.allValuesOk = true
+	return newCompressor(input, *wl, false).collectAndSortFrequencies()
 }
 
 func (c *compressor) collectAndSortFrequencies() (ret []Frequency, err error) {
@@ -134,14 +123,14 @@ func (c *compressor) collectFrequencies() (ret map[interface{}]int, err error) {
 			return d, nil
 		},
 		stringHook: func(l msgpackInt, s string) error {
-			if c.valueWhiteList.hasString(s) {
+			if c.valueWhitelist.hasString(s) {
 				ret[s]++
 			}
 			return nil
 		},
 		binaryHook: func(l msgpackInt, b []byte) error {
 			s := string(b)
-			if c.valueWhiteList.hasBinary(b) {
+			if c.valueWhitelist.hasBinary(b) {
 				ret[binaryMapKey(s)]++
 			}
 			return nil

@@ -80,20 +80,19 @@ func TestCompressWithWhiteList(t *testing.T) {
 		ret, _ := hex.DecodeString(s)
 		return ret
 	}
-	wl := ValueWhiteList{
-		Strings: []string{"team1"},
-		Binaries: [][]byte{
-			d("6fb1e234cad5e24be2fa84809ef0d518"),
-			d("1b4f0e9851971998e732078544c96b19"),
-			d("4a8d6e318170eef7233b6cccedf8d1dea4828fbca1c6d5fe279d4be13994d50c0e0c7b655655a9188a6eaf73a90198ec643c4ea66f68ac46a1eaea7ba2489ee1"),
-			d("2b38d80c7fb55c8001754c0559f7d520"),
-			d("57601e2c28b9a72eb7aa95559c096c24"),
-			d("01209647b483afa8f6c0a2c79dd5aa86660250a2ad8370cf9dcaf3edb35572bf973c0a"),
-		},
-	}
+
+	wl := NewValueWhitelist()
+	wl.AddString("team1")
+	wl.AddBinary(d("6fb1e234cad5e24be2fa84809ef0d518"))
+	wl.AddBinary(d("1b4f0e9851971998e732078544c96b19"))
+	wl.AddBinary(d("4a8d6e318170eef7233b6cccedf8d1dea4828fbca1c6d5fe279d4be13994d50c0e0c7b655655a9188a6eaf73a90198ec643c4ea66f68ac46a1eaea7ba2489ee1"))
+	wl.AddBinary(d("2b38d80c7fb55c8001754c0559f7d520"))
+	wl.AddBinary(d("57601e2c28b9a72eb7aa95559c096c24"))
+	wl.AddBinary(d("01209647b483afa8f6c0a2c79dd5aa86660250a2ad8370cf9dcaf3edb35572bf973c0a"))
+
 	b, err := base64.StdEncoding.DecodeString(thread106)
 	require.NoError(t, err)
-	out, err := CompressWithWhiteList(b, wl)
+	out, err := CompressWithWhiteList(b, *wl)
 	require.NoError(t, err)
 	fmt.Printf("compressed t106: %d -> %d\n", len(b), len(out))
 	dat2, err := Inflate(out)
